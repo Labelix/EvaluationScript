@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import logging
 import os
 
 import cv2
@@ -226,7 +227,7 @@ if __name__ == "__main__":
     # mp.set_start_method("spawn", force=True)
     args = get_parser().parse_args()
 
-    logger = setup_logger()
+    logger = logging.getLogger()
     logger.propagate = False
     logger.info("Arguments: " + str(args))
 
