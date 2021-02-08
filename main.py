@@ -3,6 +3,7 @@
 import argparse
 import logging
 import os
+import glob
 
 import cv2
 import numpy as np
@@ -98,7 +99,8 @@ def get_paths(in_dir):
 
     images = []
     for path in tqdm.tqdm(in_dir, disable=not "/tmp/out"):
-        images.append(path)
+        imgs = glob.glob(path)
+        images.extend(imgs)
 
     # logger.info("IMAGES: {}".format(images))
 

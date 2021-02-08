@@ -60,7 +60,7 @@
     </EXTENSION>
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="main.py" />
-    <option name="PARAMETERS" value="--masks_only --config-file $PROJECT_DIR$/../../../appuser/detectron2_repo/configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml --input /tmp/in/kitchen.jpg --output /tmp/out --opts MODEL.WEIGHTS &quot;/tmp/weights/model_final_f10217.pkl&quot;" />
+    <option name="PARAMETERS" value="--masks_only --config-file $PROJECT_DIR$/../../../appuser/detectron2_repo/configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml --input /tmp/in/* --output /tmp/out --opts MODEL.WEIGHTS &quot;/tmp/weights/model_final_f10217.pkl&quot;" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />
