@@ -7,12 +7,16 @@ import glob
 
 import cv2
 import numpy as np
+import torch
 import tqdm
 
 from detectron2.config import get_cfg
 from detectron2.data import DatasetCatalog, MetadataCatalog, build_detection_test_loader
 from detectron2.data.datasets import register_coco_instances
 from detectron2.engine import DefaultTrainer, DefaultPredictor, default_argument_parser, default_setup, hooks, launch
+from detectron2.utils import comm
+from detectron2.utils.collect_env import collect_env_info
+from detectron2.utils.env import seed_all_rng
 from detectron2.utils.logger import setup_logger
 from detectron2.utils.visualizer import Visualizer, GenericMask
 from detectron2.evaluation import (
@@ -27,6 +31,8 @@ from detectron2.evaluation import (
     inference_on_dataset,
     print_csv_format,
 )
+from fvcore.common.file_io import PathManager
+
 
 def get_parser():
     parser = argparse.ArgumentParser(
@@ -69,7 +75,7 @@ def get_parser():
     )
     parser.add_argument(
         "--output",
-        default="./code/checkpoints",
+        default="./out/checkpoints",
         help="A file or directory to save output visualizations. "
              "If not given, will show output in an OpenCV window.",
     )
@@ -90,19 +96,35 @@ def get_parser():
         action='store_true',
         help="Flag to only write masks to output directory.",
     )
+    parser.add_argument(
+        "--inference_only",
+        action='store_true',
+        help="Flag to only write inference image to output directory.",
+    )
+    parser.add_argument(
+        "--disable-config-output",
+        action='store_true',
+        help="Disable config.yaml output.",
+    )
+    parser.add_argument(
+        "--disable-log-output",
+        action='store_true',
+        help="Disable log.txt output.",
+    )
     return parser
 
 
 def get_paths(in_dir):
-    # logger.info("IMAGES: {}".format(in_dir))
-    # im = glob.glob(os.path.expanduser(in_dir))
-
     images = []
-    for path in tqdm.tqdm(in_dir, disable=not "/tmp/out"):
+
+    progress = tqdm.tqdm(in_dir, "/tmp/out")
+
+    for path in progress:
+        progress.set_description(path)
         imgs = glob.glob(path)
         images.extend(imgs)
 
-    # logger.info("IMAGES: {}".format(images))
+    logger.info("IMAGES: {}".format(images))
 
     return images
 
@@ -131,7 +153,7 @@ def setup(args, eval=True):
     #    cfg.MODEL.WEIGHTS = "../weights/model_final_f10217.pkl"  # os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
 
     cfg.freeze()
-    default_setup(cfg, args)
+    custom_setup(cfg, args)
 
     return cfg
 
@@ -155,7 +177,7 @@ def main(args):
     # os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
 
     # evaluate trained model
-    if not args.masks_only:
+    if not args.masks_only and not args.inference_only:
         os.makedirs(os.path.join(cfg.OUTPUT_DIR, "inference"), exist_ok=True)
         os.makedirs(os.path.join(cfg.OUTPUT_DIR, "masks"), exist_ok=True)
 
@@ -218,11 +240,65 @@ def main(args):
                                          )
 
                         vis = vis.draw_instance_predictions(outputs["instances"].to("cpu"))
-                        vis.save(os.path.join(cfg.OUTPUT_DIR, "inference", basename))
+                        vis.save(os.path.join(cfg.OUTPUT_DIR, "" if args.inference_only else "inference", basename))
                 except AttributeError:
                     logger.error("No segmentation exists!")
             else:
                 logger.info('No Instances found!')
+
+
+def custom_setup(cfg, args):
+    """
+    Perform some basic common setups at the beginning of a job, including:
+
+    1. Set up the detectron2 logger
+    2. Log basic information about environment, cmdline arguments, and config
+    3. Backup the config to the output directory
+
+    Args:
+        cfg (CfgNode): the full config to be used
+        args (argparse.NameSpace): the command line arguments to be logged
+    """
+    output_dir = cfg.OUTPUT_DIR
+    if comm.is_main_process() and output_dir:
+        PathManager.mkdirs(output_dir)
+
+    rank = comm.get_rank()
+
+    if args.disable_log_output:
+        setup_logger(distributed_rank=rank, name="fvcore")
+        logger = setup_logger(distributed_rank=rank)
+    else:
+        setup_logger(output_dir, distributed_rank=rank, name="fvcore")
+        logger = setup_logger(output_dir, distributed_rank=rank)
+
+    logger.info("Rank of current process: {}. World size: {}".format(rank, comm.get_world_size()))
+    logger.info("Environment info:\n" + collect_env_info())
+
+    logger.info("Command line arguments: " + str(args))
+    if hasattr(args, "config_file") and args.config_file != "":
+        logger.info(
+            "Contents of args.config_file={}:\n{}".format(
+                args.config_file, PathManager.open(args.config_file, "r").read()
+            )
+        )
+
+    logger.info("Running with full config:\n{}".format(cfg))
+    if hasattr(args, "disable-config-output") and args.disable_config_output and comm.is_main_process() and output_dir:
+        # Note: some of our scripts may expect the existence of
+        # config.yaml in output directory
+        path = os.path.join(output_dir, "config.yaml")
+        with PathManager.open(path, "w") as f:
+            f.write(cfg.dump())
+        logger.info("Full config saved to {}".format(path))
+
+    # make sure each worker has a different, yet deterministic seed if specified
+    seed_all_rng(None if cfg.SEED < 0 else cfg.SEED + rank)
+
+    # cudnn benchmark has large overhead. It shouldn't be used considering the small size of
+    # typical validation set.
+    if not (hasattr(args, "eval_only") and args.eval_only):
+        torch.backends.cudnn.benchmark = cfg.CUDNN_BENCHMARK
 
 
 if __name__ == "__main__":
